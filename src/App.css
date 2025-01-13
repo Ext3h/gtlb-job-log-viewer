@@ -56,7 +56,7 @@ body {
   justify-content: space-between;
   width: 100%;
   white-space: pre-wrap;
-  word-wrap: break-word;
+  word-wrap: anywhere;
 }
 
 .duration {
