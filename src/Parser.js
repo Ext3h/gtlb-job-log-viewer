@@ -172,9 +172,7 @@ function Section(props) {
                     </a>
 
                     <div className="text" style={{'padding-left': (sectionStart ? props.indent - 1 : props.indent) * 2 + "ex"}}>
-                      <div>
-                        {formatedText}
-                      </div>
+                      <span>{formatedText}</span>
                       {sectionStart && (
                         <span className="duration">{durationString}</span>
                       )}
