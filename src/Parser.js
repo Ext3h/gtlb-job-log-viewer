@@ -6,12 +6,10 @@ import { ReactComponent as ArrowRight } from "./arrow-right.svg";
 import { ReactComponent as ArrowDown } from "./arrow-down.svg";
 
 // const startRegex = /section_start:(?<startTimestamp>\d+):(?<sectionName>.+)\re\[0K(?<sectionHeader>.+)?/;
-const startRegex = /section_start:(?<startTimestamp>\d+):(?<sectionName>.+)/;
+const startRegex = /section_start:(?<startTimestamp>\d+):(?<sectionName>[a-zA-Z0-9-_]+)(?:\[(?<sectionOptions>[a-zA-Z0-9-_,=]+)\])?/;
 
 // const endRegex = /section_end:(?<endTimestamp>\d+):(?<sectionName>.+)\re\[0K/;
-const endRegex = /section_end:(?<endTimestamp>\d+):(?<sectionName>.+)/;
-
-const { pathname } = window.location;
+const endRegex = /section_end:(?<endTimestamp>\d+):(?<sectionName>[a-zA-Z0-9-_]+)/;
 
 function getStyle(part) {
   const style = {};
@@ -62,51 +60,68 @@ function Parser(props) {
     };
   });
 
-  const groupBeSection = [
-    {
-      lines: [],
-    },
-  ];
+  const rootGroup =
+  {
+    lines: [],
+    options: [],
+    indent: 0,
+  };
+
+  let groupStack = [rootGroup];
+
+  let lastGroup = rootGroup;
 
   for (const line of logsByRows) {
-    const lastGroup = groupBeSection[groupBeSection.length - 1];
+    const lastGroup = groupStack[groupStack.length - 1];
     const openMatched = line.text.match(startRegex);
     const closeMatched = line.text.match(endRegex);
 
     if (!openMatched && !closeMatched) {
-      lastGroup.lines.push(line);
+      if(line.text)
+      {
+        lastGroup.lines.push(line);
+      }
     } else if (openMatched) {
-      const { startTimestamp, sectionName, sectionHeader } = openMatched.groups;
+      const { startTimestamp, sectionName, sectionOptions } = openMatched.groups;
 
-      groupBeSection.push({
+      const parsedOptions = sectionOptions ? sectionOptions.split(",") : [];
+
+      let group = {
+        lineNumber: line.lineNumber,
         startTimestamp,
         sectionName,
         lines: [],
-        sectionHeader,
-      });
+        indent: lastGroup.indent + 1,
+        options: parsedOptions,
+      };
+      lastGroup.lines.push(group);
+      groupStack.push(group);
     } else if (closeMatched) {
       const { endTimestamp, sectionName } = closeMatched.groups;
 
-      if (lastGroup.sectionName === sectionName) {
-        lastGroup.endTimestamp = endTimestamp;
+      for(let groupIndex = groupStack.length - 1; groupIndex >= 1; --groupIndex)
+      {
+        const section = groupStack[groupIndex];
+        // In case of missing end_section tags, apply to all still unclosed sections on the stack.
+        section.endTimestamp = endTimestamp;
+        if(section.sectionName === sectionName)
+        {
+          groupStack.splice(groupIndex, groupStack.length - groupIndex);
+          break;
+        }
       }
     }
   }
 
-  window.__groupBeSection = groupBeSection;
   window.__format = format;
 
   return (
-    <code>
-      {groupBeSection.map((section, index) => {
-        return <Section {...section} key={index} />;
-      })}
-    </code>
+    <Section {...rootGroup}/>
   );
 }
 
 function Section(props) {
-  const [opened, toggle] = useState(true);
+  const [opened, toggle] = useState(props.options.includes("collapsed=true") ? false : true);
 
   let durationString;
   if (props.endTimestamp && props.startTimestamp) {
@@ -120,98 +135,59 @@ function Section(props) {
     <>
       <section>
         {props.lines.map((line, lineIndex) => {
-          const json = anser.ansiToJson(line.text);
 
           const sectionStart = lineIndex === 0 && props.sectionName;
 
-          const text = json.map((stringPart, partIndex) => {
-            return (
-              <span key={partIndex} style={getStyle(stringPart)}>
-                {stringPart.content}
-              </span>
-            );
-          });
-
           if (sectionStart || opened) {
-            return (
-              <div
-                key={lineIndex}
-                className={`row ${sectionStart ? "section-row" : ""}`}
-                onClick={sectionStart ? () => toggle(!opened) : undefined}
-                role={sectionStart ? "button" : ""}
-                id={`L${line.lineNumber}`}
-              >
-                {sectionStart && (
-                  <div className="arrow">
-                    {opened ? <ArrowDown /> : <ArrowRight />}
+            if('text' in line)
+            {
+              const formatedText = anser.ansiToJson(line.text).map((stringPart, partIndex) => {
+                return stringPart.content ? (
+                  <span key={partIndex} style={getStyle(stringPart)}>
+                    {stringPart.content}
+                  </span>
+                ) : null;
+              }).filter(Boolean);
+
+              if(sectionStart || formatedText.length > 0)
+              {
+                return (
+                  <div
+                    key={lineIndex}
+                    className={`row ${sectionStart ? "section-row" : ""}`}
+                    onClick={sectionStart ? () => toggle(!opened) : undefined}
+                    role={sectionStart ? "button" : ""}
+                    id={`L${line.lineNumber}`}
+                  >
+                    {sectionStart && (
+                      <div className="arrow">
+                        {opened ? <ArrowDown /> : <ArrowRight />}
+                      </div>
+                    )}
+                    <a
+                      href={`#L${line.lineNumber}`}
+                      className="line-number"
+                    >
+                      {line.lineNumber}
+                    </a>
+
+                    <div className="text" style={{'padding-left': (sectionStart ? props.indent - 1 : props.indent) * 2 + "ex"}}>
+                      <div>
+                        {formatedText}
+                      </div>
+                      {sectionStart && (
+                        <span className="duration">{durationString}</span>
+                      )}
+                    </div>
                   </div>
-                )}
-                <a
-                  href={`${pathname}#L${line.lineNumber}`}
-                  className="line-number"
-                >
-                  {line.lineNumber}
-                </a>
-
-                <div className="text">
-                  <div key={lineIndex}>{text}</div>
-                  {sectionStart && (
-                    <span className="duration">{durationString}</span>
-                  )}
-                </div>
-              </div>
-            );
+                );
+              }
+            }
+            else if('lines' in line)
+            {
+              return (<Section {...line} key={lineIndex}/>);
+            }
           }
-          {
-            /* 
-          if (lineIndex === 0 && props.sectionName) {
-            return (
-              <div className="row">
-                <a
-                  href={`${pathname}#${line.lineNumber}`}
-                  className="line-number"
-                >
-                  {line.lineNumber}
-                </a>
-                <div
-                  key={lineIndex}
-                  role="button"
-                  className="section-name"
-                  onClick={() => toggle(!opened)}
-                >
-                  {json.map((stringPart, partIndex) => {
-                    return (
-                      <span key={partIndex} style={getStyle(stringPart)}>
-                        {stringPart.content}
-                      </span>
-                    );
-                  })}
-                  <span className="duration">{durationString}</span>
-                </div>
-              </div>
-            );
-          } */
-          }
-
-          {
-            /* if (opened) {
-            return (
-              <div className="row">
-                <a className="line-number">{line.lineNumber}</a>
-                <div key={lineIndex}>
-                  {json.map((stringPart, partIndex) => {
-                    return (
-                      <span key={partIndex} style={getStyle(stringPart)}>
-                        {stringPart.content}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          } */
-          }
-
           return null;
         })}
       </section>
