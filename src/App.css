@@ -51,9 +51,12 @@ body {
   fill: currentColor;
 }
 
-.text {
+.section-row .text {
   display: flex;
   justify-content: space-between;
+}
+
+.text {
   width: 100%;
   white-space: pre-wrap;
   word-wrap: anywhere;
